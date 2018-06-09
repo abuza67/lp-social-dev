@@ -1,0 +1,312 @@
+<?php
+
+/**
+ * @file
+ * The Social User Export module.
+ */
+
+use Drupal\Component\Plugin\Exception\InvalidPluginDefinitionException;
+use Drupal\Core\Form\FormStateInterface;
+use Drupal\user\UserInterface;
+use Drupal\views\Views;
+
+/**
+ * Implements hook_form_alter().
+ */
+function social_user_export_form_alter(&$form, FormStateInterface $form_state, $form_id) {
+  switch ($form_id) {
+    case 'views_form_user_admin_people_page_1':
+      // Fetch the amount of rows directly from the already executed view.
+      $count = $form['output'][0]['#view']->total_rows;
+      $form_state->set('query', \Drupal::request()->query->all());
+
+      $form['#attached']['library'][] = 'social_user_export/select_all';
+      $form['#attached']['drupalSettings']['socialUserExport'] = [
+        'usersCount' => $count,
+      ];
+
+      $form['select_all'] = [
+        '#type' => 'hidden',
+        '#attributes' => [
+          'id' => 'select-all',
+        ],
+      ];
+      break;
+
+    case 'views_exposed_form':
+      $view = $form_state->get('view');
+
+      if ($view->id() == 'user_admin_people' && $view->current_display = 'page_1') {
+        $form['created']['min']['#type'] = 'date';
+        $form['created']['min']['#title'] = t('Registered from');
+        $form['created']['max']['#type'] = 'date';
+        $form['created']['max']['#title'] = t('Registered to');
+
+        if (isset($form['group']) && ($items = _social_user_export_get_groups())) {
+          $form['group'] = array_merge($form['group'], [
+            '#type' => 'select',
+            '#options' => $items,
+            '#empty_option' => t('- Any -'),
+            '#size' => 1,
+          ]);
+        }
+      }
+      break;
+  }
+}
+
+/**
+ * Implements hook_views_data_alter().
+ */
+function social_user_export_views_data_alter(array &$data) {
+  $data['users']['user_bulk_form']['field']['id'] = 'social_user_export_bulk_form';
+}
+
+/**
+ * Returns the user admin people view.
+ *
+ * @param array $query
+ *   Query parameters for exposed filters.
+ * @param bool $execute
+ *   If TRUE, views query will be executed.
+ *
+ * @return \Drupal\views\ViewExecutable
+ *   The requested view.
+ */
+function _social_user_export_get_view(array $query = [], $execute = TRUE) {
+  $view = Views::getView('user_admin_people');
+  $view->setDisplay('page_1');
+  $view->setExposedInput($query);
+
+  if ($execute) {
+    $view->preExecute();
+    $view->execute();
+  }
+
+  return $view;
+}
+
+/**
+ * Returns first name of user.
+ *
+ * @param \Drupal\user\UserInterface $account
+ *   The account to get the data for.
+ *
+ * @return string
+ *   Returns first name of the use.
+ */
+function social_user_export_first_name(UserInterface $account) {
+  $first_name = '';
+  /** @var \Drupal\profile\ProfileStorageInterface $storage */
+  // Check if entity type 'profile' exists.
+  try {
+    $storage = \Drupal::entityTypeManager()->getStorage('profile');
+    if (!empty($storage)) {
+      if ($user_profile = $storage->loadByUser($account, 'profile', TRUE)) {
+        $first_name = $user_profile->get('field_profile_first_name')->value;
+      }
+    }
+  }
+  catch (InvalidPluginDefinitionException $e) {
+    $first_name = '';
+  }
+  return $first_name;
+}
+
+/**
+ * Returns last name of user.
+ *
+ * @param \Drupal\user\UserInterface $account
+ *   The account to get the data for.
+ *
+ * @return string
+ *   Returns last name of the user.
+ */
+function social_user_export_last_name(UserInterface $account) {
+  $last_name = '';
+  /** @var \Drupal\profile\ProfileStorageInterface $storage */
+  // Check if entity type 'profile' exists.
+  try {
+    $storage = \Drupal::entityTypeManager()->getStorage('profile');
+    if (!empty($storage)) {
+      if ($user_profile = $storage->loadByUser($account, 'profile', TRUE)) {
+        $last_name = $user_profile->get('field_profile_last_name')->value;
+      }
+    }
+  }
+  catch (InvalidPluginDefinitionException $e) {
+    $last_name = '';
+  }
+  return $last_name;
+}
+
+/**
+ * Returns quantity of comments posted by specific user.
+ *
+ * @param \Drupal\user\UserInterface $account
+ *   The account to get the data for.
+ *
+ * @return int
+ *   Quantity of comments posted by the account.
+ */
+function social_user_export_comments_count(UserInterface $account) {
+  $query = \Drupal::database()->select('comment', 'c');
+  $query->join('comment_field_data', 'cfd', 'cfd.cid = c.cid');
+  $query->condition('cfd.uid', $account->id());
+
+  return (int) $query
+    ->countQuery()
+    ->execute()
+    ->fetchField();
+}
+
+/**
+ * Returns quantity of posts created by specific user.
+ *
+ * @param \Drupal\user\UserInterface $account
+ *   The account to get the data for.
+ *
+ * @return int
+ *   Quantity of posts created by the account.
+ */
+function social_user_export_posts_count(UserInterface $account) {
+  $query = \Drupal::database()->select('post', 'p');
+  $query->join('post_field_data', 'pfd', 'pfd.id = p.id');
+  $query->condition('pfd.user_id', $account->id());
+
+  return (int) $query
+    ->countQuery()
+    ->execute()
+    ->fetchField();
+}
+
+/**
+ * Returns quantity of nodes created by specific user.
+ *
+ * @param \Drupal\user\UserInterface $account
+ *   The account to get the data for.
+ * @param string $type
+ *   The node type to filter on.
+ *
+ * @return int
+ *   Quantity of nodes created by the account.
+ */
+function social_user_export_nodes_count(UserInterface $account, $type) {
+  $query = \Drupal::database()->select('node', 'n');
+  $query->join('node_field_data', 'nfd', 'nfd.nid = n.nid');
+  $query
+    ->condition('nfd.type', $type)
+    ->condition('nfd.uid', $account->id());
+
+  return (int) $query
+    ->countQuery()
+    ->execute()
+    ->fetchField();
+}
+
+/**
+ * Returns quantity of enrollments of specific user.
+ *
+ * @param \Drupal\user\UserInterface $account
+ *   The account to get the data for.
+ *
+ * @return int
+ *   Quantity of enrollments by the account.
+ */
+function social_user_export_events_enrollments_count(UserInterface $account) {
+  $query = \Drupal::database()->select('event_enrollment', 'ee');
+  $query->join('event_enrollment_field_data', 'eefd', 'eefd.id = ee.id');
+  $query->condition('eefd.user_id', $account->id());
+
+  return (int) $query
+    ->countQuery()
+    ->execute()
+    ->fetchField();
+}
+
+/**
+ * Returns quantity of groups created by specific user.
+ *
+ * @param \Drupal\user\UserInterface $account
+ *   The account to get the data for.
+ *
+ * @return int
+ *   Quantity of groups created by the account.
+ */
+function social_user_export_groups_count(UserInterface $account) {
+  $query = \Drupal::database()->select('groups', 'g');
+  $query->join('groups_field_data', 'gfd', 'gfd.id = g.id');
+  $query->condition('gfd.uid', $account->id());
+
+  return (int) $query
+    ->countQuery()
+    ->execute()
+    ->fetchField();
+}
+
+/**
+ * Returns number of private messages sent per user.
+ *
+ * @param \Drupal\user\UserInterface $account
+ *   The account that sends messages.
+ *
+ * @return int
+ *   The number of private messages.
+ */
+function social_user_export_number_of_private_messages(UserInterface $account) {
+  return $private_messages = \Drupal::entityQuery('private_message')
+    ->condition('owner', $account->id())
+    ->count()
+    ->execute();
+}
+
+/**
+ * Returns the quantity of likes by a user.
+ *
+ * @param \Drupal\user\UserInterface $account
+ *   The account to get the data for.
+ *
+ * @return int
+ *   number of likes
+ */
+function social_user_export_likes_count(UserInterface $account) {
+  $query = \Drupal::database()->select('votingapi_vote', 'v');
+  $query->condition('v.user_id', $account->id());
+
+  return (int) $query
+    ->countQuery()
+    ->execute()
+    ->fetchField();
+}
+
+/**
+ * Implements hook_file_download().
+ */
+function social_user_export_file_download($uri) {
+  $scheme = \Drupal::service('file_system')->uriScheme($uri);
+  $target = file_uri_target($uri);
+  $access = \Drupal::currentUser()->hasPermission('administer users');
+
+  if ($scheme == 'private' && preg_match('/^csv\/export-users-([a-f0-9]{12})\.csv$/i', $target) && $access) {
+    return [
+      'Content-disposition' => 'attachment; filename="' . basename($target) . '"',
+    ];
+  }
+}
+
+/**
+ * Returns array with titles of all groups.
+ */
+function _social_user_export_get_groups() {
+  $data = &drupal_static(__FUNCTION__);
+
+  if (empty($data)) {
+    $data = \Drupal::database()
+      ->select('groups_field_data', 'gfd')
+      ->fields('gfd', ['id', 'label'])
+      ->execute()
+      ->fetchAllKeyed(0, 1);
+  }
+
+  return $data;
+}
