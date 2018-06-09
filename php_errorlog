@@ -1,0 +1,1 @@
+[08-Jun-2018 14:54:27 CST6CDT] PHP Fatal error:  Out of memory (allocated 837820416) (tried to allocate 33554440 bytes) in phar:///usr/local/bin/composer.phar/src/Composer/DependencyResolver/RuleSet.php on line 77
